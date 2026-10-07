@@ -3138,10 +3138,9 @@ function applyBackupData(data){
 
   const curSunday = isoOf(sundayOf(new Date()));
   if(!weeksStore[curSunday]) weeksStore[curSunday] = defaultWeekState(curSunday);
-  const targetWeek = (data.weekState && data.weekState.weekStart && weeksStore[data.weekState.weekStart])
-    ? data.weekState.weekStart
-    : curSunday;
-  weekState = getOrCreateWeek(targetWeek);
+  // sempre abre na semana atual (antes abria na semana salva no backup,
+  // e o que era marcado ia para essa semana antiga em vez da atual)
+  weekState = getOrCreateWeek(curSunday);
 }
 
 async function importBackupFromFile(file){
