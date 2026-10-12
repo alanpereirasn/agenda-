@@ -73,7 +73,6 @@
     letter-spacing:.2px;
   }
   .topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-  .sync-pill{border-color:#2E9BFF;}
   .week-range{color:var(--muted);font-size:13px;}
   .btn-ghost{
     background:var(--surface2);border:1px solid var(--border);color:var(--text);
@@ -764,7 +763,7 @@
       <button class="side-tab " data-act="tab" data-tab="financeiro">
         <span class="ico">💰</span><span class="lbl"><span class="lbl-long">Financeiro</span><span class="lbl-short">Financeiro</span></span>
       </button>
-    <div class="side-foot">Salvo neste aparelho e, com ☁️ Entrar,<br>sincronizado entre computador e celular.</div>
+    <div class="side-foot">Salvo neste aparelho. Com ☁️ sync ligado,<br>fica igual no computador e no celular.</div>
   </nav>
     
   <header class="topbar">
@@ -2209,8 +2208,8 @@ function fmtHoras(min){
 }
 
 /* ======================= PERSISTENT STORAGE ======================= */
-/* Salva no localStorage do navegador (funciona offline) e, se você entrar
-   com a conta Google, também sincroniza com a nuvem (ver CloudSync no fim). */
+/* Salva no localStorage do navegador (funciona offline) e, com a sincronização
+   ligada, também num Gist secreto do GitHub (ver CloudSync no fim do arquivo). */
 const Store = {
   async get(key){
     try{
@@ -2223,7 +2222,7 @@ const Store = {
     try{ prev = localStorage.getItem('agenda_'+key); }catch(e){}
     try{ localStorage.setItem('agenda_'+key, value); }
     catch(e){ console.error('localStorage set error', key, e); }
-    // avisa a sincronização na nuvem (se estiver ativa) só quando algo mudou
+    // avisa a sincronização (GitHub Gist) só quando algo mudou de verdade
     if(prev !== value && window.CloudSync){
       try{ window.CloudSync.onLocalSet(key, value); }catch(e){ console.error('sync', e); }
     }
@@ -3656,7 +3655,7 @@ function renderSideNav(){
       <button class="side-tab ${currentTab===t.key?'on':''}" data-act="tab" data-tab="${t.key}" ${currentTab===t.key?'aria-current="page"':''}>
         <span class="ico">${t.icon}</span><span class="lbl"><span class="lbl-long">${t.label}</span><span class="lbl-short">${t.short}</span></span>${tabBadge(t.key)}
       </button>`).join('')}
-    <div class="side-foot">Salvo neste aparelho e, com ☁️ Entrar,<br>sincronizado entre computador e celular.</div>
+    <div class="side-foot">Salvo neste aparelho. Com ☁️ sync ligado,<br>fica igual no computador e no celular.</div>
   </nav>`;
 }
 
@@ -3830,7 +3829,7 @@ function renderTopbar(){
         <button class="btn-ghost week-nav-btn" data-act="week-next" title="próxima semana">›</button>
       </div>
       ${isCurrentWeek ? '' : `<button class="btn-ghost" data-act="week-today" title="voltar para a semana atual">◎ semana atual</button>`}
-      <button class="btn-ghost sync-pill" data-sync="1" title="${window.CloudSync?CloudSync.title():''}">${window.CloudSync?CloudSync.label():'☁️'}</button>
+      <button class="btn-ghost sync-pill ${window.CloudSync?CloudSync.cls():''}" data-sync="1" title="${window.CloudSync?CloudSync.title():''}">${window.CloudSync?CloudSync.label():'☁️'}</button>
       <button class="btn-ghost" id="btnExport" title="baixar um arquivo com todo o seu progresso">⬇️ backup</button>
       <button class="btn-ghost" id="btnImport" title="restaurar progresso a partir de um backup">⬆️ restaurar</button>
       <input type="file" id="importFile" accept="application/json" style="display:none">
@@ -5350,185 +5349,345 @@ function wireDelegatedClicks(){
 
 </script>
 
-<!-- ======================= SINCRONIZAÇÃO NA NUVEM (Firebase) ======================= -->
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<!-- ======================= SINCRONIZAÇÃO VIA GITHUB GIST ======================= -->
+<style>
+  .sync-pill{border-color:#2E9BFF;}
+  .sync-pill.st-ok{border-color:var(--c-pos,#4ADE80);}
+  .sync-pill.st-pending,.sync-pill.st-checking{border-color:#FFC93C;}
+  .sync-pill.st-error,.sync-pill.st-offline{border-color:var(--c-neg,#F04438);}
+  .sync-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .sync-box{background:var(--surface,#161B26);border:1px solid var(--border,#2a3142);border-radius:16px;color:var(--text,#eee);
+    width:100%;max-width:440px;max-height:90vh;overflow:auto;padding:20px;font-family:var(--font-body,system-ui);box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .sync-box h3{margin:0 0 6px;font-size:18px;}
+  .sync-box p,.sync-box li{font-size:13.5px;line-height:1.5;color:var(--muted,#aab);}
+  .sync-box ol{padding-left:20px;margin:8px 0;}
+  .sync-box a{color:#2E9BFF;}
+  .sync-box label{display:block;font-size:12.5px;color:var(--muted,#aab);margin:12px 0 4px;}
+  .sync-box input{width:100%;box-sizing:border-box;background:var(--surface2,#1d2331);border:1px solid var(--border,#2a3142);color:var(--text,#eee);
+    border-radius:10px;padding:10px 12px;font-size:14px;}
+  .sync-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
+  .sync-row button{flex:1;min-width:120px;}
+  .sync-btn-main{background:#2E9BFF !important;border-color:#2E9BFF !important;color:#fff !important;}
+  .sync-state{background:var(--surface2,#1d2331);border-radius:12px;padding:12px;margin:10px 0;font-size:13.5px;line-height:1.6;}
+  .sync-state b{color:var(--text,#eee);}
+  .sync-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--surface3,#252c3b);color:var(--text,#eee);
+    border:1px solid var(--border,#2a3142);padding:10px 16px;border-radius:999px;font-size:13px;z-index:9998;box-shadow:0 8px 30px rgba(0,0,0,.4);
+    max-width:90vw;text-align:center;transition:opacity .3s;}
+</style>
 <script>
-/* ============================================================
-   COLE AQUI A CONFIGURAÇÃO DO SEU PROJETO FIREBASE
-   (Console do Firebase → ⚙️ Configurações do projeto → Seus apps → Web → firebaseConfig)
-   Enquanto estiver vazio, a agenda funciona só neste navegador, como antes.
-   ============================================================ */
-const FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
-};
-
 /* ------------------------------------------------------------
-   Como funciona:
-   - Tudo continua sendo salvo no navegador (funciona offline).
-   - Com login Google, cada dado (semanas, biblioteca, finanças…) é enviado
-     para users/{seu-uid}/kv/{chave} no Firestore.
-   - Cada chave guarda a hora da última edição; na hora de juntar,
-     vence a edição mais recente.
-   - Mudanças feitas em outro aparelho chegam em tempo real.
+   Sincronização entre aparelhos usando um Gist SECRETO da sua conta GitHub.
+   - Tudo continua salvo no navegador (funciona offline).
+   - Com o token configurado, os dados vão para o arquivo
+     "agenda-semana-em-foco.json" num Gist secreto seu.
+   - Cada parte dos dados (semanas, biblioteca, finanças…) guarda a hora
+     da última edição; ao juntar, vence a edição mais recente.
+   - A agenda confere a nuvem ao abrir, ao voltar para a aba e a cada 30 s.
    ------------------------------------------------------------ */
 const CloudSync = (() => {
   const SYNC_KEYS = ['topic_library','weeks_all','streaks','pend_progress','financas','leituras'];
-  const META_KEY = 'agenda__syncmeta';
-  const CHUNK = 900000;               // limite de ~1 MB por documento do Firestore
-  const deviceId = (() => {
-    try{
-      let d = localStorage.getItem('agenda__device');
-      if(!d){ d = 'd'+Math.random().toString(36).slice(2,10); localStorage.setItem('agenda__device', d); }
-      return d;
-    }catch(e){ return 'd'+Math.random().toString(36).slice(2,10); }
-  })();
+  const FILE = 'agenda-semana-em-foco.json';
+  const API = 'https://api.github.com';
+  const POLL_MS = 30000;
 
-  let status = 'nocfg', errMsg = '', user = null, db = null, auth = null;
-  let ready = false, applying = false, unsub = null, inflight = 0;
-  const timers = {};
-  let reloadTimer = null;
+  const ls = {
+    get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+    set(k,v){ try{ localStorage.setItem(k,v); }catch(e){ console.error(e); } },
+    del(k){ try{ localStorage.removeItem(k); }catch(e){} },
+    json(k){ try{ return JSON.parse(localStorage.getItem(k)||'{}')||{}; }catch(e){ return {}; } }
+  };
+  const lsData = k => ls.get('agenda_'+k);
 
-  const lsGet = k => { try{ return localStorage.getItem('agenda_'+k); }catch(e){ return null; } };
-  const lsSet = (k,v) => { try{ localStorage.setItem('agenda_'+k, v); }catch(e){ console.error(e); } };
-  function loadMeta(){ try{ return JSON.parse(localStorage.getItem(META_KEY)||'{}')||{}; }catch(e){ return {}; } }
-  let meta = loadMeta();
-  function saveMeta(){ try{ localStorage.setItem(META_KEY, JSON.stringify(meta)); }catch(e){} }
+  let token = ls.get('agenda__gh_token') || '';
+  let gistId = ls.get('agenda__gist_id') || '';
+  let deviceName = ls.get('agenda__device_name') ||
+    (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'Celular' : 'Computador');
+  let meta = ls.json('agenda__syncmeta');      // chave -> hora da última edição conhecida
+  let pushed = ls.json('agenda__syncpushed');  // chave -> hora que já está na nuvem
+  let info = ls.json('agenda__syncinfo');      // lastCheck, cloudSavedAt, cloudDevice
 
-  /* ---------- interface (botão no topo) ---------- */
+  let status = token ? 'checking' : 'nocfg';
+  let errMsg = '';
+  let busy = false, again = false, applying = false;
+  let pushTimer = null, pollTimer = null, reloadTimer = null;
+
+  const saveState = () => {
+    ls.set('agenda__syncmeta', JSON.stringify(meta));
+    ls.set('agenda__syncpushed', JSON.stringify(pushed));
+    ls.set('agenda__syncinfo', JSON.stringify(info));
+  };
+  const pendingKeys = () => SYNC_KEYS.filter(k => lsData(k) !== null && (meta[k]||0) > (pushed[k]||0));
+  const hhmm = t => t ? new Date(t).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+  const quando = t => {
+    if(!t) return 'nunca';
+    const d = new Date(t), hoje = new Date();
+    const mesmoDia = d.toDateString() === hoje.toDateString();
+    return mesmoDia ? 'hoje às '+hhmm(t) : d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' às '+hhmm(t);
+  };
+
+  /* ---------------- aviso no topo ---------------- */
   function label(){
     switch(status){
-      case 'nocfg':     return '☁️ sync off';
-      case 'signedout': return '☁️ Entrar';
-      case 'syncing':   return '⏳ salvando…';
-      case 'ok':        return '☁️ sincronizado';
-      case 'offline':   return '📴 offline';
-      case 'error':     return '⚠️ erro sync';
-      default:          return '☁️';
+      case 'nocfg':    return '☁️ Ativar sync';
+      case 'checking': return '🔄 conferindo…';
+      case 'pending':  return '⏳ enviando…';
+      case 'ok':       return '✅ sincronizado';
+      case 'offline':  return pendingKeys().length ? '📴 offline · não enviado' : '📴 offline';
+      case 'error':    return '⚠️ erro na sync';
     }
+    return '☁️';
   }
   function title(){
     switch(status){
-      case 'nocfg':     return 'Sincronização não configurada (veja FIREBASE_CONFIG no código)';
-      case 'signedout': return 'Entrar com Google para sincronizar entre aparelhos';
-      case 'ok':        return 'Sincronizado como '+(user && user.email || '')+' — clique para sair';
-      case 'syncing':   return 'Enviando alterações…';
-      case 'offline':   return 'Sem internet: salvando neste aparelho, envia quando voltar';
-      case 'error':     return 'Erro: '+errMsg;
-      default:          return '';
+      case 'nocfg':   return 'Clique para sincronizar computador e celular';
+      case 'ok':      return 'Igual à nuvem · conferido '+quando(info.lastCheck)+' · clique para detalhes';
+      case 'pending': return 'Há alterações deste aparelho ainda não enviadas';
+      case 'offline': return 'Sem internet. As alterações ficam salvas aqui e vão quando a conexão voltar';
+      case 'error':   return 'Erro: '+errMsg;
     }
+    return '';
   }
   function paint(){
-    document.querySelectorAll('[data-sync]').forEach(el => { el.textContent = label(); el.title = title(); });
+    document.querySelectorAll('[data-sync]').forEach(el => {
+      el.textContent = label(); el.title = title();
+      el.className = el.className.replace(/\bst-\w+/g,'').trim() + ' st-'+status;
+    });
+    const box = document.getElementById('syncStateBox');
+    if(box) box.innerHTML = stateHtml();
   }
-  function setStatus(s, msg){ status = s; if(msg) errMsg = msg; paint(); }
-  function refreshStatus(){
-    if(!db) return;
-    if(!user) return setStatus('signedout');
-    if(!navigator.onLine) return setStatus('offline');
-    if(inflight > 0 || Object.keys(timers).length) return setStatus('syncing');
-    setStatus('ok');
+  function setStatus(s, msg){ status = s; if(msg !== undefined) errMsg = msg; paint(); }
+
+  function toast(msg, ms){
+    let el = document.getElementById('syncToast');
+    if(!el){ el = document.createElement('div'); el.id = 'syncToast'; el.className = 'sync-toast'; document.body.appendChild(el); }
+    el.textContent = msg; el.style.opacity = '1';
+    clearTimeout(el._t); el._t = setTimeout(() => { el.style.opacity = '0'; }, ms || 3500);
   }
 
-  async function click(){
-    if(status === 'nocfg'){
-      alert('A sincronização ainda não foi configurada.\n\nAbra o index.html, procure por FIREBASE_CONFIG e cole a configuração do seu projeto Firebase.');
-      return;
-    }
-    if(status === 'error' && user){
-      alert('Erro na sincronização:\n'+errMsg+'\n\nSeus dados continuam salvos neste aparelho.');
-      return;
-    }
-    if(!user){
-      const provider = new firebase.auth.GoogleAuthProvider();
+  function stateHtml(){
+    if(!token) return '⚪ <b>Sincronização desligada.</b> Os dados ficam só neste aparelho.';
+    const pend = pendingKeys().length;
+    let linha1;
+    if(status === 'ok')           linha1 = '✅ <b>Este aparelho está igual à nuvem.</b>';
+    else if(status === 'pending') linha1 = '⏳ <b>Enviando alterações deste aparelho…</b>';
+    else if(status === 'checking')linha1 = '🔄 <b>Conferindo a nuvem…</b>';
+    else if(status === 'offline') linha1 = '📴 <b>Sem internet.</b> '+(pend ? pend+' parte(s) com alterações esperando para enviar.' : 'Nada pendente.');
+    else                          linha1 = '⚠️ <b>Erro:</b> '+escapeSync(errMsg);
+    return linha1 +
+      '<br>Última conferência: <b>'+quando(info.lastCheck)+'</b>' +
+      '<br>Última gravação na nuvem: <b>'+quando(info.cloudSavedAt)+'</b>'+(info.cloudDevice ? ' pelo <b>'+escapeSync(info.cloudDevice)+'</b>' : '') +
+      '<br>Este aparelho: <b>'+escapeSync(deviceName)+'</b>';
+  }
+  function escapeSync(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  /* ---------------- janela de configuração ---------------- */
+  function openPanel(){
+    closePanel();
+    const ov = document.createElement('div');
+    ov.className = 'sync-ov'; ov.id = 'syncOv';
+    ov.innerHTML = `
+      <div class="sync-box" role="dialog" aria-label="Sincronização">
+        <h3>☁️ Sincronização entre aparelhos</h3>
+        <div class="sync-state" id="syncStateBox">${stateHtml()}</div>
+        ${token ? `
+          <label>Nome deste aparelho</label>
+          <input id="syncDev" value="${escapeSync(deviceName)}" maxlength="30">
+          <div class="sync-row">
+            <button class="btn-ghost sync-btn-main" id="syncNow">🔄 Sincronizar agora</button>
+            <button class="btn-ghost" id="syncClose">Fechar</button>
+          </div>
+          <div class="sync-row"><button class="btn-ghost" id="syncOff">Desligar neste aparelho</button></div>
+        ` : `
+          <p>Os dados ficam num <b>Gist secreto</b> da sua conta do GitHub. Faça isto <b>uma vez em cada aparelho</b>:</p>
+          <ol>
+            <li>Abra <a href="https://github.com/settings/tokens/new?scopes=gist&description=Agenda%20Semana%20em%20Foco" target="_blank" rel="noopener">este link do GitHub</a> (já vem com a opção <b>gist</b> marcada).</li>
+            <li>Em <b>Expiration</b>, escolha <b>No expiration</b>.</li>
+            <li>Clique em <b>Generate token</b> e copie o código que começa com <code>ghp_</code>.</li>
+            <li>Cole aqui embaixo e clique em <b>Conectar</b>.</li>
+          </ol>
+          <label>Token do GitHub</label>
+          <input id="syncTok" type="password" placeholder="ghp_..." autocomplete="off" spellcheck="false">
+          <label>Nome deste aparelho</label>
+          <input id="syncDev" value="${escapeSync(deviceName)}" maxlength="30">
+          <p style="font-size:12px">O token fica salvo só neste navegador e só dá acesso aos seus Gists.</p>
+          <div class="sync-row">
+            <button class="btn-ghost sync-btn-main" id="syncConnect">Conectar</button>
+            <button class="btn-ghost" id="syncClose">Cancelar</button>
+          </div>
+        `}
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if(e.target === ov) closePanel(); });
+    const $ = id => document.getElementById(id);
+    const saveDev = () => { const v = ($('syncDev')||{}).value; if(v && v.trim()){ deviceName = v.trim(); ls.set('agenda__device_name', deviceName); } };
+    if($('syncClose')) $('syncClose').onclick = () => { saveDev(); closePanel(); };
+    if($('syncNow'))   $('syncNow').onclick = () => { saveDev(); syncNow(true); };
+    if($('syncOff'))   $('syncOff').onclick = () => {
+      if(!confirm('Desligar a sincronização neste aparelho? Os dados continuam salvos aqui.')) return;
+      token = ''; gistId = ''; ls.del('agenda__gh_token'); ls.del('agenda__gist_id');
+      clearInterval(pollTimer); setStatus('nocfg'); closePanel();
+    };
+    if($('syncConnect')) $('syncConnect').onclick = async () => {
+      const t = ($('syncTok').value||'').trim();
+      if(!t){ alert('Cole o token do GitHub.'); return; }
+      saveDev();
+      $('syncConnect').disabled = true; $('syncConnect').textContent = 'Conectando…';
       try{
-        await auth.signInWithPopup(provider);
+        await connect(t);
+        closePanel();
+        toast('✅ Sincronização ligada neste aparelho');
       }catch(e){
-        if(['auth/popup-blocked','auth/operation-not-supported-in-this-environment','auth/cancelled-popup-request'].includes(e.code)){
-          auth.signInWithRedirect(provider);
-        } else if(e.code !== 'auth/popup-closed-by-user'){
-          alert('Não consegui entrar: '+(e.message||e.code));
-        }
+        alert('Não consegui conectar: '+(e.message||e));
+        $('syncConnect').disabled = false; $('syncConnect').textContent = 'Conectar';
       }
-      return;
+    };
+  }
+  function closePanel(){ const o = document.getElementById('syncOv'); if(o) o.remove(); }
+
+  /* ---------------- GitHub API ---------------- */
+  async function gh(path, opts){
+    opts = opts || {};
+    const res = await fetch(API+path, {
+      method: opts.method || 'GET',
+      cache: 'no-store',
+      headers: Object.assign({
+        'Authorization': 'Bearer '+(opts.token || token),
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }, opts.body ? {'Content-Type':'application/json'} : {}),
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    if(res.status === 401) throw new Error('token inválido ou expirado (gere outro no GitHub)');
+    if(res.status === 404 && path.startsWith('/gists/')) throw Object.assign(new Error('Gist não encontrado'), {code:404});
+    if(res.status === 403) throw new Error('o GitHub recusou o acesso (o token precisa da permissão "gist")');
+    if(!res.ok) throw new Error('GitHub respondeu '+res.status);
+    return res.json();
+  }
+
+  async function findOrCreateGist(t){
+    for(let page=1; page<=5; page++){
+      const list = await gh('/gists?per_page=100&page='+page, {token:t});
+      const g = list.find(g => g.files && g.files[FILE]);
+      if(g) return g.id;
+      if(list.length < 100) break;
     }
-    if(confirm('Sincronizado como '+user.email+'.\n\nSair desta conta neste aparelho? (os dados continuam salvos aqui)')){
-      await auth.signOut();
+    const created = await gh('/gists', {token:t, method:'POST', body:{
+      description: 'Dados da agenda Semana em Foco (não apague)',
+      public: false,
+      files: { [FILE]: { content: JSON.stringify({ app:'semana-em-foco', keys:{} }) } }
+    }});
+    return created.id;
+  }
+
+  async function connect(t){
+    const id = await findOrCreateGist(t);
+    token = t; gistId = id;
+    ls.set('agenda__gh_token', t); ls.set('agenda__gist_id', id);
+    startPolling();
+    await syncNow(true);
+  }
+
+  async function readCloud(){
+    const g = await gh('/gists/'+gistId);
+    const f = g.files && g.files[FILE];
+    if(!f) return { app:'semana-em-foco', keys:{} };
+    let text = f.content;
+    if(f.truncated){
+      const r = await fetch(f.raw_url, {cache:'no-store'});
+      text = await r.text();
     }
+    try{ const d = JSON.parse(text||'{}'); if(!d.keys) d.keys = {}; return d; }
+    catch(e){ return { app:'semana-em-foco', keys:{} }; }
   }
 
-  /* ---------- chamado pelo Store.set ---------- */
-  function onLocalSet(key, value){
-    if(!SYNC_KEYS.includes(key) || applying) return;
-    if(window.__agendaBooted){ meta[key] = Date.now(); saveMeta(); }
-    if(ready && user) schedulePush(key);
-  }
-  function schedulePush(key){
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(() => { delete timers[key]; push(key); }, 800);
-    refreshStatus();
-  }
-
-  /* ---------- envio ---------- */
-  const kvCol = () => db.collection('users').doc(user.uid).collection('kv');
-  const chunkCol = () => db.collection('users').doc(user.uid).collection('chunks');
-
-  async function push(key){
-    if(!user || !db) return;
-    const value = lsGet(key);
-    if(value === null) return;
-    if(!meta[key]){ meta[key] = Date.now(); saveMeta(); }
-    const updatedAt = meta[key];
-    inflight++; refreshStatus();
+  /* ---------------- sincronizar ---------------- */
+  async function syncNow(manual){
+    if(!token || !gistId) return;
+    if(busy){ again = true; return; }
+    if(!navigator.onLine){ setStatus('offline'); return; }
+    busy = true;
+    if(manual || pendingKeys().length) setStatus(pendingKeys().length ? 'pending' : 'checking');
     try{
-      if(value.length <= CHUNK){
-        await kvCol().doc(key).set({ value, updatedAt, device: deviceId, parts: 0 });
-      } else {
-        const batch = db.batch();
-        const n = Math.ceil(value.length / CHUNK);
-        for(let i=0;i<n;i++){
-          batch.set(chunkCol().doc(key+'_'+i), { data: value.slice(i*CHUNK,(i+1)*CHUNK), updatedAt });
-        }
-        batch.set(kvCol().doc(key), { value: '', updatedAt, device: deviceId, parts: n });
-        await batch.commit();
+      let cloud;
+      try{ cloud = await readCloud(); }
+      catch(e){
+        if(e.code === 404){                          // gist apagado: cria outro
+          gistId = await findOrCreateGist(token); ls.set('agenda__gist_id', gistId);
+          cloud = await readCloud();
+        } else throw e;
       }
+
+      let changed = false, needPush = false, from = null, backup = null;
+      for(const key of SYNC_KEYS){
+        const c = cloud.keys[key];
+        const local = lsData(key);
+        const lt = meta[key] || 0;
+        if(c && c.updatedAt > lt){
+          if(c.value !== local){
+            if(local !== null && lt === 0){ backup = backup || {}; backup[key] = local; }
+            ls.set('agenda_'+key, c.value); changed = true; from = c.device || from;
+          }
+          meta[key] = c.updatedAt; pushed[key] = c.updatedAt;
+        } else if(local !== null && (!c || lt > c.updatedAt)){
+          if(!lt) meta[key] = Date.now();
+          cloud.keys[key] = { value: local, updatedAt: meta[key], device: deviceName };
+          needPush = true;
+        } else if(c){
+          pushed[key] = c.updatedAt;
+        }
+      }
+      if(backup) ls.set('agenda__antes_da_sync', JSON.stringify(backup));
+
+      if(needPush){
+        cloud.app = 'semana-em-foco';
+        cloud.savedAt = Date.now();
+        cloud.device = deviceName;
+        await gh('/gists/'+gistId, { method:'PATCH', body:{ files: { [FILE]: { content: JSON.stringify(cloud) } } } });
+        SYNC_KEYS.forEach(k => { if(cloud.keys[k]) pushed[k] = cloud.keys[k].updatedAt; });
+      }
+      info.lastCheck = Date.now();
+      info.cloudSavedAt = cloud.savedAt || info.cloudSavedAt || null;
+      info.cloudDevice = cloud.device || info.cloudDevice || '';
+      saveState();
+
+      if(changed){
+        scheduleReload();
+        toast('🔄 Atualizado com as mudanças feitas no '+(from || 'outro aparelho'));
+      } else if(manual){
+        toast(needPush ? '✅ Alterações enviadas' : '✅ Tudo igual à nuvem');
+      }
+      setStatus(pendingKeys().length ? 'pending' : 'ok', '');
     }catch(e){
-      console.error('sync push', key, e);
-      setStatus('error', e.message || String(e));
-      inflight--; return;
+      console.error('sync', e);
+      saveState();
+      setStatus(navigator.onLine ? 'error' : 'offline', e.message || String(e));
     }
-    inflight--; refreshStatus();
+    busy = false;
+    if(again){ again = false; syncNow(); }
   }
 
-  async function readValue(doc){
-    const d = doc.data();
-    if(!d.parts) return d.value;
-    const parts = [];
-    for(let i=0;i<d.parts;i++){
-      const c = await chunkCol().doc(doc.id+'_'+i).get();
-      if(!c.exists || c.data().updatedAt !== d.updatedAt) return null;  // ainda chegando
-      parts.push(c.data().data);
-    }
-    return parts.join('');
+  /* chamado pelo Store.set quando algum dado muda */
+  function onLocalSet(key){
+    if(!SYNC_KEYS.includes(key) || applying) return;
+    if(!window.__agendaBooted) return;          // gravações automáticas da abertura não contam como edição
+    meta[key] = Date.now(); saveState();
+    if(!token) return;
+    setStatus(navigator.onLine ? 'pending' : 'offline');
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => syncNow(), 1500);
   }
 
-  /* ---------- recarregar a tela com os dados novos ---------- */
+  /* ---------------- recarregar a tela com dados novos ---------------- */
   function isTyping(){
     const a = document.activeElement;
-    return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'button' && a.type !== 'file';
+    return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !a.closest('#syncOv') && a.type !== 'button' && a.type !== 'file';
   }
   function scheduleReload(){
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(async function tick(){
       if(isTyping()){ reloadTimer = setTimeout(tick, 1500); return; }
       await reloadApp();
-    }, 300);
+    }, 200);
   }
   async function reloadApp(){
     applying = true;
@@ -5544,94 +5703,29 @@ const CloudSync = (() => {
       render();
     }catch(e){ console.error('sync reload', e); }
     applying = false;
+    paint();
   }
 
-  /* ---------- primeira sincronização depois do login ---------- */
-  async function initialSync(){
-    setStatus('syncing');
-    let snap;
-    try{ snap = await kvCol().get(); }
-    catch(e){ setStatus('error', e.message || String(e)); return; }
-    const cloud = {};
-    for(const doc of snap.docs){ cloud[doc.id] = { updatedAt: doc.data().updatedAt||0, doc }; }
-
-    let changed = false, backup = null;
-    const toPush = [];
-    for(const key of SYNC_KEYS){
-      const c = cloud[key];
-      const local = lsGet(key);
-      const lt = meta[key] || 0;
-      if(c && c.updatedAt > lt){
-        const v = await readValue(c.doc);
-        if(v === null) continue;
-        if(v !== local){
-          if(local !== null && lt === 0){ backup = backup || {}; backup[key] = local; }
-          lsSet(key, v); changed = true;
-        }
-        meta[key] = c.updatedAt;
-      } else if(local !== null && (!c || lt > c.updatedAt)){
-        toPush.push(key);
-      }
-    }
-    if(backup){ try{ localStorage.setItem('agenda__antes_da_sync', JSON.stringify(backup)); }catch(e){} }
-    saveMeta();
-    if(changed) await reloadApp();
-    ready = true;
-    toPush.forEach(k => push(k));
-    listen();
-    refreshStatus();
+  /* ---------------- início ---------------- */
+  function startPolling(){
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => { if(document.visibilityState === 'visible') syncNow(); }, POLL_MS);
   }
-
-  /* ---------- tempo real: mudanças vindas de outro aparelho ---------- */
-  function listen(){
-    if(unsub) unsub();
-    unsub = kvCol().onSnapshot(async snap => {
-      let changed = false;
-      for(const ch of snap.docChanges()){
-        if(ch.type === 'removed' || ch.doc.metadata.hasPendingWrites) continue;
-        const key = ch.doc.id;
-        if(!SYNC_KEYS.includes(key)) continue;
-        const d = ch.doc.data();
-        if((d.updatedAt||0) <= (meta[key]||0)) continue;
-        const v = await readValue(ch.doc);
-        if(v === null) continue;
-        meta[key] = d.updatedAt;
-        if(v !== lsGet(key)){ lsSet(key, v); changed = true; }
-      }
-      saveMeta();
-      if(changed) scheduleReload();
-    }, e => { console.error('sync listen', e); setStatus('error', e.message || String(e)); });
-  }
-
-  /* ---------- inicialização ---------- */
   function start(){
-    const configured = FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId;
-    if(!configured){ setStatus('nocfg'); return; }
-    if(typeof firebase === 'undefined'){ setStatus('offline'); return; }
-    try{
-      firebase.initializeApp(FIREBASE_CONFIG);
-      auth = firebase.auth();
-      db = firebase.firestore();
-      db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-    }catch(e){ setStatus('error', e.message || String(e)); return; }
-
-    window.addEventListener('online', refreshStatus);
-    window.addEventListener('offline', refreshStatus);
-    auth.getRedirectResult().catch(e => console.warn('redirect', e));
-    auth.onAuthStateChanged(u => {
-      user = u; ready = false;
-      if(unsub){ unsub(); unsub = null; }
-      if(!u){ setStatus('signedout'); return; }
-      initialSync();
+    document.addEventListener('click', e => {
+      if(e.target.closest('[data-sync]')){ e.preventDefault(); openPanel(); }
     });
-    setStatus('signedout');
+    document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') syncNow(); });
+    window.addEventListener('focus', () => syncNow());
+    window.addEventListener('online', () => syncNow());
+    window.addEventListener('offline', () => { if(token) setStatus('offline'); });
+    if(token && gistId){ startPolling(); syncNow(); }
+    else if(token){ connect(token).catch(e => setStatus('error', e.message)); }
+    paint();
   }
 
-  document.addEventListener('click', e => {
-    if(e.target.closest('[data-sync]')){ e.preventDefault(); click(); }
-  });
-
-  return { start, onLocalSet, label, title, paint };
+  const cls = () => 'st-'+status;
+  return { start, onLocalSet, label, title, paint, syncNow, cls };
 })();
 window.CloudSync = CloudSync;
 CloudSync.start();
